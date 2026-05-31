@@ -11,6 +11,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "firebase-admin": "^13.10.0",
     "mqtt": "^5.15.1"
   }
