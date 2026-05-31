@@ -5,6 +5,7 @@
 const mqtt  = require('mqtt');
 const admin = require('firebase-admin');
 const serviceAccount = require('./serviceAccountKey.json');
+const { checkAlerts } = require('./alerts.js');
 
 // Initialise Firebase
 admin.initializeApp({
@@ -46,6 +47,9 @@ client.on('message', async (topic, message) => {
                     lastSeen: admin.firestore.FieldValue.serverTimestamp(),
                     status:   'online'
                 }, { merge: true });
+
+            // 3. Check thresholds and save alerts
+            await checkAlerts('node_01', payload);      
 
             console.log(`[${new Date().toLocaleTimeString()}] Written to Firestore — level: ${payload.level_pct}%  pH: ${payload.ph}`);
         }
