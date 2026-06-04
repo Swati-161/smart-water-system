@@ -1,4 +1,3 @@
-// lib/models/sensor_data.dart
 class SensorData {
   final double levelPct;
   final double ph;

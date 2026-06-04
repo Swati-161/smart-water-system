@@ -1,4 +1,3 @@
-// lib/screens/login_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dashboard_screen.dart';
@@ -113,7 +112,7 @@ class _LoginScreenState extends State<LoginScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
 
-                // ── Logo / icon ─────────────────────────────
+                // ── Logo ─────────────────────────────
                 Container(
                   width: 90, height: 90,
                   decoration: BoxDecoration(
