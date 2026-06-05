@@ -3,22 +3,20 @@
 // SmAart Home-Water Management System — Main Firmware
 // ESP32 DevKit V1  |  PlatformIO + Arduino framework
 //
-// CURRENT STATUS:
-//   ✅ waterLevel.cpp  — written by Person A
-//   ✅ phSensor.cpp    — written by Person A
-//   ⏳ turbiditySensor.cpp — Person B (mock value used until pushed)
-//   ⏳ flowSensor.cpp      — Person B (mock value used until pushed)
-//   ⏳ leakSensor.cpp      — Person B (mock value used until pushed)
+// ── STATUS ───────────────────────────────────────────────────────────
+//   ✅ waterLevel.cpp       JSN-SR04T ultrasonic
+//   ✅ phSensor.cpp         TCS34725 colour sensor + pH test strips
+//   ✅ turbiditySensor.cpp  DIY LDR turbidity sensor
+//   ✅ flowSensor.cpp       YF-S201 hall-effect flow meter
+//   ✅ leakSensor.cpp       FC-37 moisture sensor
 //
-// HOW MOCK MODE WORKS:
-//   USE_MOCK_DATA true  → all sensors return simulated values (no hardware)
-//   USE_MOCK_DATA false → real sensor functions called (hardware required)
+// ── MOCK MODE ────────────────────────────────────────────────────────
+//   USE_MOCK_DATA true  → simulated values (no hardware needed)
+//   USE_MOCK_DATA false → real sensor functions (hardware required)
 //
-// TEAMMATE INTEGRATION:
-//   Search "TODO-TEAMMATE" in this file to find every place
-//   that needs updating when a teammate pushes their sensor code.
-//   Changes needed: #include at top, init() in setup(), read() in readAllSensors()
-//   Nothing else in this file needs to change.
+// ── WHEN HARDWARE ARRIVES — only 2 changes needed ────────────────────
+//   1. config.h  → update TANK_HEIGHT_CM after measuring real tank
+//   2. main.cpp  → set USE_MOCK_DATA to false
 // ─────────────────────────────────────────────────────────────────────
 
 #include <Arduino.h>
@@ -26,66 +24,48 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include "config.h"
-
-// ── Sensor includes ───────────────────────────────────────────────────
-// ✅ Already written — include now
 #include "sensors/waterLevel.h"
 #include "sensors/phSensor.h"
-
-// TODO-TEAMMATE: Uncomment these 3 lines when teammates push their files
-// #include "sensors/turbiditySensor.h"
-// #include "sensors/flowSensor.h"
-// #include "sensors/leakSensor.h"
+#include "sensors/turbiditySensor.h"
+#include "sensors/flowSensor.h"
+#include "sensors/leakSensor.h"
 
 // ─────────────────────────────────────────────────────────────────────
-// MOCK / REAL DATA SWITCH
-// Set false only when ALL sensors are written AND hardware is connected
+// ▶▶ SINGLE SWITCH — flip to false when hardware is connected ◀◀
 // ─────────────────────────────────────────────────────────────────────
 #define USE_MOCK_DATA true
 
 // ─────────────────────────────────────────────────────────────────────
 // SENSOR DATA STRUCT
-// Holds one complete reading from all sensors.
-// All fields defined now — teammates' sensors populate their own fields
-// when integrated. Until then mock values fill the gaps.
 // ─────────────────────────────────────────────────────────────────────
 struct SensorData {
-    float level;          // % (0.0 – 100.0), -1.0 = error
-    float pH;             // pH units (0.0 – 14.0), -1.0 = error
-    float turbidity;      // NTU, -1.0 = error
-    float flowRate;       // L/min, -1.0 = error
+    float level;          // % (0.0–100.0),  -1.0 = error
+    float pH;             // pH units,        -1.0 = error
+    float turbidity;      // NTU,             -1.0 = error
+    float flowRate;       // L/min,           -1.0 = error
     float totalLitres;    // cumulative litres today
-    bool  leakDetected;   // true = moisture sensor wet
-    float batteryVoltage; // V (3.0 – 4.2)
-    bool  mockActive;     // true = any field is a mock value
+    bool  leakDetected;   // true = moisture detected
+    float batteryVoltage; // V (3.0–4.2)
+    bool  mockActive;     // true = mock data in use
 };
 
 // ─────────────────────────────────────────────────────────────────────
-// MOCK DATA — simulates realistic sensor values for home testing
-// Turbidity, flow, leak, battery are permanently mocked until
-// teammates push. Level and pH use mock only when USE_MOCK_DATA = true.
+// MOCK DATA
 // ─────────────────────────────────────────────────────────────────────
 namespace Mock {
     float level     = 72.0;
     float pH        = 7.1;
-    float turbidity = 0.8;   // NTU — clean water
-    float flow      = 0.0;   // L/min — no flow
+    float turbidity = 0.8;
+    float flow      = 0.0;
     float litres    = 0.0;
     bool  leak      = false;
-    float battery   = 3.85;  // V — healthy battery
+    float battery   = 3.85;
 
     void tick() {
-        // Simulate gradual tank drain → refill cycle
         level -= 0.4;
-        if (level < 8.0) level = 95.0; // tank "refilled"
-
-        // Simulate slight pH drift (realistic variation)
-        pH = 7.0 + (random(-15, 20) / 100.0);
-
-        // Simulate small ongoing usage accumulation
+        if (level < 8.0) level = 95.0;
+        pH      = 7.0 + (random(-15, 20) / 100.0);
         litres += 0.2;
-
-        // Simulate battery slow discharge
         battery -= 0.0005;
         if (battery < 3.2) battery = 4.1;
     }
@@ -97,8 +77,8 @@ namespace Mock {
 WiFiClient   espClient;
 PubSubClient mqtt(espClient);
 
-static bool wifiConnected  = false;
-static bool mqttConnected  = false;
+static bool wifiConnected = false;
+static bool mqttConnected = false;
 
 // Forward declarations
 void connectWiFi();
@@ -115,11 +95,11 @@ SensorData readAllSensors();
 // ─────────────────────────────────────────────────────────────────────
 // TIMING
 // ─────────────────────────────────────────────────────────────────────
-static unsigned long lastSensorRead  = 0;
-static unsigned long lastMqttRetry   = 0;
-static unsigned long lastWifiRetry   = 0;
-static const unsigned long MQTT_RETRY_INTERVAL = 10000; // 10 seconds
-static const unsigned long WIFI_RETRY_INTERVAL = 30000; // 30 seconds
+static unsigned long lastSensorRead = 0;
+static unsigned long lastMqttRetry  = 0;
+static unsigned long lastWifiRetry  = 0;
+static const unsigned long MQTT_RETRY_INTERVAL = 10000;
+static const unsigned long WIFI_RETRY_INTERVAL = 30000;
 
 // ─────────────────────────────────────────────────────────────────────
 // SETUP
@@ -132,50 +112,63 @@ void setup() {
     Serial.println(  "║  ESP32 Firmware  |  Booting...         ║");
     Serial.println(  "╚════════════════════════════════════════╝");
 
-    // ── STEP 1: Relay (valve) — MUST be first line of setup ──────────
-    // Active-LOW relay: HIGH = relay OFF = valve CLOSED (safe default)
-    // If this is not first, pin floats during boot and may pulse the valve
+    // ── STEP 1: Relay — MUST be first ────────────────────────────────
     pinMode(PIN_RELAY, OUTPUT);
     digitalWrite(PIN_RELAY, HIGH);
-    Serial.println("[BOOT] ✅ Relay init — valve CLOSED");
+    Serial.println("[BOOT] Relay init — valve CLOSED");
 
-    // ── STEP 2: Status LEDs ───────────────────────────────────────────
+    // ── STEP 2: LEDs ──────────────────────────────────────────────────
     pinMode(PIN_LED_GREEN,  OUTPUT);
     pinMode(PIN_LED_RED,    OUTPUT);
     pinMode(PIN_LED_YELLOW, OUTPUT);
     digitalWrite(PIN_LED_GREEN,  LOW);
     digitalWrite(PIN_LED_RED,    LOW);
-    digitalWrite(PIN_LED_YELLOW, HIGH); // yellow on = booting
-    Serial.println("[BOOT] ✅ LEDs init");
+    digitalWrite(PIN_LED_YELLOW, HIGH);
+    Serial.println("[BOOT] LEDs init");
 
-    // ── STEP 3: Initialise sensors ────────────────────────────────────
-    #if !USE_MOCK_DATA
-        waterLevel_init();
-        phSensor_init();
-        // TODO-TEAMMATE: Uncomment when files are pushed
-        // turbiditySensor_init();
-        // flowSensor_init();
-        // leakSensor_init();
+    // ── STEP 3: Sensors ───────────────────────────────────────────────
+    #if USE_MOCK_DATA
+        Serial.println("[BOOT] MOCK DATA MODE — no hardware required");
     #else
-        Serial.println("[BOOT] ⚠️  MOCK DATA MODE active — no hardware needed");
-        Serial.println("[BOOT]     Water level and pH: using real sensor code");
-        Serial.println("[BOOT]     Turbidity / flow / leak: mocked until teammates push");
+        waterLevel_init();
+        leakSensor_init();
+        flowSensor_init();
+        turbiditySensor_init();
+        phSensor_init();    // TCS34725 via I2C — init last
+        Serial.println("[BOOT] All sensors initialised");
     #endif
 
-    // ── STEP 4: Connect WiFi ──────────────────────────────────────────
+    // ── STEP 4: WiFi ──────────────────────────────────────────────────
     connectWiFi();
 
-    // ── STEP 5: Configure MQTT ────────────────────────────────────────
+    // ── STEP 5: MQTT ──────────────────────────────────────────────────
     mqtt.setServer(MQTT_BROKER, MQTT_PORT);
     mqtt.setCallback(mqttCallback);
     mqtt.setKeepAlive(60);
-    mqtt.setBufferSize(512); // ensure buffer big enough for JSON payload
+    mqtt.setBufferSize(512);
     if (wifiConnected) connectMQTT();
 
-    // ── Boot complete ─────────────────────────────────────────────────
     digitalWrite(PIN_LED_YELLOW, LOW);
     digitalWrite(PIN_LED_GREEN,  wifiConnected && mqttConnected ? HIGH : LOW);
-    Serial.println("[BOOT] ✅ Boot complete. Entering main loop.");
+
+    #if USE_MOCK_DATA
+        Serial.println("[BOOT] Running in MOCK mode");
+    #else
+        Serial.println("[BOOT] Running with REAL hardware");
+    #endif
+
+    Serial.println("[BOOT] Boot complete.");
+    Serial.println("─────────────────────────────────────────────");
+
+    // ── Print available serial commands ──────────────────────────────
+    Serial.println("[CMD] Serial commands available (real hardware mode only):");
+    Serial.println("[CMD]   RAWPH          — print raw R,G,B,C from colour sensor");
+    Serial.println("[CMD]   RAWTB          — print raw turbidity voltage");
+    Serial.println("[CMD]   CAL4 R G B     — calibrate pH4 with RGB values");
+    Serial.println("[CMD]   CAL7 R G B     — calibrate pH7 with RGB values");
+    Serial.println("[CMD]   CAL10 R G B    — calibrate pH10 with RGB values");
+    Serial.println("[CMD]   VALVE OPEN     — open solenoid valve");
+    Serial.println("[CMD]   VALVE CLOSE    — close solenoid valve");
     Serial.println("─────────────────────────────────────────────");
 }
 
@@ -184,6 +177,74 @@ void setup() {
 // ─────────────────────────────────────────────────────────────────────
 void loop() {
     unsigned long now = millis();
+
+    // ── Serial calibration command handler ────────────────────────────
+    // These commands are only meaningful when real hardware is connected.
+    // In mock mode they do nothing harmful — they just won't return
+    // real sensor values.
+    //
+    // Usage in Serial Monitor (set line ending to "Newline"):
+    //   RAWPH          → prints raw R,G,B,C from TCS34725
+    //   RAWTB          → prints raw turbidity voltage from LDR
+    //   CAL4 180 80 60 → sets pH 4.0 calibration to those RGB values
+    //   CAL7 120 140 80
+    //   CAL10 60 80 160
+    //   VALVE OPEN     → opens solenoid valve immediately
+    //   VALVE CLOSE    → closes solenoid valve immediately
+    if (Serial.available()) {
+        String cmd = Serial.readStringUntil('\n');
+        cmd.trim();
+
+        if (cmd == "RAWPH") {
+            uint16_t r, g, b, c;
+            readPH_rawColour(r, g, b, c);
+            Serial.println("[CMD] R:" + String(r) + " G:" + String(g)
+                + " B:" + String(b) + " C:" + String(c));
+
+        } else if (cmd == "RAWTB") {
+            Serial.println("[CMD] Turbidity voltage: "
+                + String(readTurbidity_rawVoltage(), 4) + "V");
+
+        } else if (cmd.startsWith("CAL4 ") || cmd.startsWith("CAL7 ")
+                || cmd.startsWith("CAL10 ")) {
+            // Parse: CAL4 R G B  or  CAL10 R G B
+            float targetPH;
+            int spaceAfterCmd;
+            if (cmd.startsWith("CAL10 ")) {
+                targetPH = 10.0;
+                spaceAfterCmd = 6;
+            } else if (cmd.startsWith("CAL4 ")) {
+                targetPH = 4.0;
+                spaceAfterCmd = 5;
+            } else {
+                targetPH = 7.0;
+                spaceAfterCmd = 5;
+            }
+
+            String args = cmd.substring(spaceAfterCmd);
+            // Expected format: "180 80 60"
+            int s1 = args.indexOf(' ');
+            int s2 = args.indexOf(' ', s1 + 1);
+            if (s1 < 0 || s2 < 0) {
+                Serial.println("[CMD] Format error. Use: CAL4 R G B (e.g. CAL4 180 80 60)");
+            } else {
+                uint16_t r = args.substring(0, s1).toInt();
+                uint16_t g = args.substring(s1 + 1, s2).toInt();
+                uint16_t b = args.substring(s2 + 1).toInt();
+                phSensor_calibrate(targetPH, r, g, b);
+            }
+
+        } else if (cmd == "VALVE OPEN") {
+            handleCommand("OPEN");
+
+        } else if (cmd == "VALVE CLOSE") {
+            handleCommand("CLOSE");
+
+        } else if (cmd.length() > 0) {
+            Serial.println("[CMD] Unknown command: " + cmd);
+            Serial.println("[CMD] Type RAWPH, RAWTB, CAL4/7/10 R G B, VALVE OPEN/CLOSE");
+        }
+    }
 
     // ── Maintain WiFi ─────────────────────────────────────────────────
     if (WiFi.status() != WL_CONNECTED) {
@@ -203,7 +264,7 @@ void loop() {
             connectMQTT();
         }
     }
-    if (mqttConnected) mqtt.loop(); // process incoming messages
+    if (mqttConnected) mqtt.loop();
 
     // ── Read sensors and publish ──────────────────────────────────────
     if (now - lastSensorRead >= READING_INTERVAL_MS) {
@@ -217,70 +278,53 @@ void loop() {
         if (mqttConnected) {
             publishSensorData(data);
         } else {
-            Serial.println("[MQTT] Not connected — reading stored locally only");
+            Serial.println("[MQTT] Not connected — data not published");
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────
 // READ ALL SENSORS
-// This is the only function you modify when teammates push their code.
-// Each sensor has a clearly marked section. When a teammate pushes,
-// comment out their mock line and uncomment their real function call.
 // ─────────────────────────────────────────────────────────────────────
 SensorData readAllSensors() {
     SensorData data;
-    data.mockActive = false;
 
-    // ── WATER LEVEL ───────────────────────────────────────────────────
-    // Status: ✅ Real code written — toggle with USE_MOCK_DATA
     #if USE_MOCK_DATA
         Mock::tick();
-        data.level = Mock::level;
-        data.mockActive = true;
+        data.mockActive     = true;
+        data.level          = Mock::level;
+        data.pH             = Mock::pH;
+        data.turbidity      = Mock::turbidity;
+        data.flowRate       = Mock::flow;
+        data.totalLitres    = Mock::litres;
+        data.leakDetected   = Mock::leak;
+        data.batteryVoltage = Mock::battery;
+
     #else
+        data.mockActive = false;
+
+        // Water level — JSN-SR04T via GPIO25/26
         data.level = readWaterLevel();
-    #endif
 
-    // ── pH ────────────────────────────────────────────────────────────
-    // Status: ✅ Real code written — toggle with USE_MOCK_DATA
-    #if USE_MOCK_DATA
-        data.pH = Mock::pH;
-    #else
+        // pH — TCS34725 colour sensor + pH test strips via I2C (GPIO21/22)
         data.pH = readPH();
+
+        // Turbidity — DIY LDR sensor via GPIO35
+        data.turbidity = readTurbidity();
+
+        // Flow rate — YF-S201 via GPIO27 interrupt
+        data.flowRate    = readFlowRate();
+        data.totalLitres = getTotalLitres();
+
+        // Leak — FC-37 via GPIO32
+        data.leakDetected = checkLeakSensor();
+
+        // Battery voltage — mocked until PCB assembled
+        // After PCB: comment line below, uncomment the two lines after it
+        data.batteryVoltage = 3.85;
+        // float raw = analogRead(PIN_BATTERY_MON);
+        // data.batteryVoltage = (raw / ADC_RESOLUTION) * ADC_VREF * 2.0;
     #endif
-
-    // ── TURBIDITY ─────────────────────────────────────────────────────
-    // Status: ⏳ Awaiting teammate push
-    // TODO-TEAMMATE: When turbiditySensor.cpp is pushed:
-    //   1. Uncomment: #include "sensors/turbiditySensor.h"  (top of file)
-    //   2. Uncomment: turbiditySensor_init();               (in setup)
-    //   3. Comment out the mock line below
-    //   4. Uncomment the real read line below
-    data.turbidity = Mock::turbidity; // ← MOCK: remove when teammate pushes
-    // data.turbidity = readTurbidity(); // ← REAL: uncomment when teammate pushes
-
-    // ── FLOW RATE ─────────────────────────────────────────────────────
-    // Status: ⏳ Awaiting teammate push
-    // TODO-TEAMMATE: Same 4-step process as turbidity above
-    data.flowRate    = Mock::flow;    // ← MOCK: remove when teammate pushes
-    data.totalLitres = Mock::litres;  // ← MOCK: remove when teammate pushes
-    // data.flowRate    = readFlowRate();    // ← REAL: uncomment when teammate pushes
-    // data.totalLitres = getTotalLitres();  // ← REAL: uncomment when teammate pushes
-
-    // ── LEAK SENSOR ───────────────────────────────────────────────────
-    // Status: ⏳ Awaiting teammate push
-    // TODO-TEAMMATE: Same 4-step process as turbidity above
-    data.leakDetected = Mock::leak;   // ← MOCK: remove when teammate pushes
-    // data.leakDetected = checkLeakSensor(); // ← REAL: uncomment when teammate pushes
-
-    // ── BATTERY VOLTAGE ───────────────────────────────────────────────
-    // Status: ⏳ Reading battery ADC (always mock for now — no hardware)
-    // This uses GPIO36 ADC1 pin — add real read when hardware assembled
-    data.batteryVoltage = Mock::battery; // ← MOCK until PCB assembled
-    // Real read (add after PCB assembly):
-    // float raw = analogRead(PIN_BATTERY_MON);
-    // data.batteryVoltage = (raw / ADC_RESOLUTION) * ADC_VREF * 2.0; // *2 for divider
 
     return data;
 }
@@ -295,7 +339,6 @@ void connectWiFi() {
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-    // Wait up to 15 seconds for connection
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 30) {
         delay(500);
@@ -305,14 +348,12 @@ void connectWiFi() {
 
     if (WiFi.status() == WL_CONNECTED) {
         wifiConnected = true;
-        Serial.println("\n[WiFi] ✅ Connected!");
-        Serial.println("[WiFi] IP address: " + WiFi.localIP().toString());
-        Serial.println("[WiFi] Signal strength: " + String(WiFi.RSSI()) + " dBm");
+        Serial.println("\n[WiFi] Connected — IP: " + WiFi.localIP().toString()
+            + "  RSSI: " + String(WiFi.RSSI()) + " dBm");
         digitalWrite(PIN_LED_GREEN, HIGH);
     } else {
         wifiConnected = false;
-        Serial.println("\n[WiFi] ❌ Failed to connect. Will retry in 30s.");
-        Serial.println("[WiFi] Continuing without WiFi — readings stored locally");
+        Serial.println("\n[WiFi] Failed — will retry in 30s");
     }
 }
 
@@ -320,71 +361,52 @@ void connectWiFi() {
 // MQTT CONNECTION
 // ─────────────────────────────────────────────────────────────────────
 void connectMQTT() {
-    Serial.print("[MQTT] Connecting to broker: ");
+    Serial.print("[MQTT] Connecting to: ");
     Serial.println(MQTT_BROKER);
 
-    // Last Will and Testament — broker publishes this if ESP32 disconnects
-    // unexpectedly. App sees "offline" status on the dashboard.
     String lwtTopic = String("devices/") + MQTT_CLIENT_ID + "/status";
-    String lwtMsg   = "{\"status\":\"offline\",\"device\":\"" + String(MQTT_CLIENT_ID) + "\"}";
+    String lwtMsg   = "{\"status\":\"offline\",\"device\":\""
+                    + String(MQTT_CLIENT_ID) + "\"}";
 
-    bool connected = mqtt.connect(
+    bool ok = mqtt.connect(
         MQTT_CLIENT_ID,
-        nullptr,           // username (none for HiveMQ public broker)
-        nullptr,           // password
-        lwtTopic.c_str(),  // LWT topic
-        1,                 // LWT QoS
-        true,              // LWT retain
-        lwtMsg.c_str()     // LWT message
+        nullptr, nullptr,
+        lwtTopic.c_str(), 1,
+        true,
+        lwtMsg.c_str()
     );
 
-    if (connected) {
+    if (ok) {
         mqttConnected = true;
-        Serial.println("[MQTT] ✅ Connected to broker");
-
-        // Subscribe to command topic (valve open/close from app)
         mqtt.subscribe(MQTT_TOPIC_SUB);
-        Serial.println("[MQTT] Subscribed to: " + String(MQTT_TOPIC_SUB));
-
-        // Publish online status
-        String onlineMsg = "{\"status\":\"online\",\"device\":\"" + String(MQTT_CLIENT_ID)
-            + "\",\"fw\":\"1.0.0\"}";
-        mqtt.publish(lwtTopic.c_str(), onlineMsg.c_str(), true); // retain = true
-
+        Serial.println("[MQTT] Connected — subscribed to " + String(MQTT_TOPIC_SUB));
+        String onlineMsg = "{\"status\":\"online\",\"device\":\""
+                         + String(MQTT_CLIENT_ID) + "\",\"fw\":\"1.0.0\"}";
+        mqtt.publish(lwtTopic.c_str(), onlineMsg.c_str(), true);
     } else {
         mqttConnected = false;
-        Serial.println("[MQTT] ❌ Connection failed. State: " + String(mqtt.state()));
-        // MQTT state codes:
-        // -4 = connection timeout    -3 = connection lost
-        // -2 = connect failed        -1 = disconnected
-        //  0 = connected              1 = bad protocol
-        //  2 = client ID rejected     3 = server unavailable
-        //  4 = bad credentials        5 = unauthorised
+        Serial.println("[MQTT] Failed — state: " + String(mqtt.state()));
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// MQTT INCOMING MESSAGE CALLBACK
-// Called automatically by mqtt.loop() when a message arrives
+// MQTT CALLBACK
 // ─────────────────────────────────────────────────────────────────────
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-    // Convert payload bytes to String
     String message = "";
     for (unsigned int i = 0; i < length; i++) {
         message += (char)payload[i];
     }
+    Serial.println("[MQTT] Received [" + String(topic) + "]: " + message);
 
-    Serial.println("[MQTT] ← Received on [" + String(topic) + "]: " + message);
-
-    // Parse command JSON: {"command":"OPEN"} or {"command":"CLOSE"}
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, message);
     if (err) {
-        Serial.println("[MQTT] ❌ JSON parse error: " + String(err.c_str()));
+        Serial.println("[MQTT] JSON parse error: " + String(err.c_str()));
         return;
     }
 
-    String command = doc["command"] | ""; // | "" = default if key missing
+    String command = doc["command"] | "";
     handleCommand(command);
 }
 
@@ -393,44 +415,33 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 // ─────────────────────────────────────────────────────────────────────
 void handleCommand(const String& command) {
     if (command == "OPEN") {
-        // Active-LOW relay: LOW = relay ON = valve OPEN
         digitalWrite(PIN_RELAY, LOW);
-        digitalWrite(PIN_LED_GREEN, HIGH);
-        Serial.println("[Valve] ✅ Opened by remote command");
-
+        Serial.println("[Valve] Opened");
     } else if (command == "CLOSE") {
-        // HIGH = relay OFF = valve CLOSED
         digitalWrite(PIN_RELAY, HIGH);
-        Serial.println("[Valve] ✅ Closed by remote command");
-
+        Serial.println("[Valve] Closed");
     } else {
-        Serial.println("[Valve] ⚠️  Unknown command: " + command);
+        Serial.println("[Valve] Unknown command: " + command);
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────
 // BUILD JSON PAYLOAD
-// Constructs the MQTT message from a SensorData struct.
-// The field names here MUST match the backend database schema.
 // ─────────────────────────────────────────────────────────────────────
 String buildPayload(const SensorData& data) {
     JsonDocument doc;
 
-    doc["device_id"]      = MQTT_CLIENT_ID;
-    doc["fw_version"]     = "1.0.0";
-    doc["mock"]           = data.mockActive;
-
-    // Sensor values — use -1 to signal error/unavailable to backend
-    if (data.level >= 0)       doc["level_pct"]      = serialized(String(data.level, 1));
-    if (data.pH >= 0)          doc["ph"]              = serialized(String(data.pH, 2));
-    if (data.turbidity >= 0)   doc["turbidity_ntu"]   = serialized(String(data.turbidity, 1));
-    if (data.flowRate >= 0)    doc["flow_lpm"]        = serialized(String(data.flowRate, 2));
-    doc["total_litres"]   = serialized(String(data.totalLitres, 1));
-    doc["leak_detected"]  = data.leakDetected;
-    doc["battery_v"]      = serialized(String(data.batteryVoltage, 2));
-
-    // Valve state
-    doc["valve_open"]     = (digitalRead(PIN_RELAY) == LOW);
+    doc["device_id"]     = MQTT_CLIENT_ID;
+    doc["fw_version"]    = "1.0.0";
+    doc["mock"]          = data.mockActive;
+    doc["level_pct"]     = data.level;
+    doc["ph"]            = data.pH;
+    doc["turbidity_ntu"] = data.turbidity;
+    doc["flow_lpm"]      = data.flowRate;
+    doc["total_litres"]  = data.totalLitres;
+    doc["leak_detected"] = data.leakDetected;
+    doc["battery_v"]     = data.batteryVoltage;
+    doc["valve_open"]    = (digitalRead(PIN_RELAY) == LOW);
 
     String payload;
     serializeJson(doc, payload);
@@ -438,94 +449,90 @@ String buildPayload(const SensorData& data) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// PUBLISH TO MQTT
+// PUBLISH SENSOR DATA
 // ─────────────────────────────────────────────────────────────────────
 void publishSensorData(const SensorData& data) {
     String payload = buildPayload(data);
-
-    bool success = mqtt.publish(MQTT_TOPIC_PUB, payload.c_str());
-
-    if (success) {
-        Serial.println("[MQTT] ↑ Published: " + payload);
+    if (mqtt.publish(MQTT_TOPIC_PUB, payload.c_str())) {
+        Serial.println("[MQTT] Published: " + payload);
     } else {
-        Serial.println("[MQTT] ❌ Publish failed — payload length: " 
-            + String(payload.length()));
+        Serial.println("[MQTT] Publish failed — length: "
+            + String(payload.length()) + " bytes");
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────
 // ALERT CHECKING
-// Compares readings against thresholds from config.h
-// For now: logs to Serial. Next step: publish alert to MQTT alert topic.
 // ─────────────────────────────────────────────────────────────────────
 void checkAlerts(const SensorData& data) {
     bool anyAlert = false;
 
-    // Water level alerts
     if (data.level >= 0) {
         if (data.level >= LEVEL_CUTOFF_HIGH) {
-            Serial.println("[ALERT] 🔴 TANK FULL (" + String(data.level,1) + "%) — closing valve");
-            digitalWrite(PIN_RELAY, HIGH); // close valve automatically
+            Serial.println("[ALERT] CRITICAL — Tank full ("
+                + String(data.level, 1) + "%) — auto closing valve");
+            digitalWrite(PIN_RELAY, HIGH);
             anyAlert = true;
         } else if (data.level <= LEVEL_CRITICAL_LOW) {
-            Serial.println("[ALERT] 🔴 CRITICAL LOW WATER (" + String(data.level,1) + "%)");
+            Serial.println("[ALERT] CRITICAL — Water critically low ("
+                + String(data.level, 1) + "%)");
             anyAlert = true;
         } else if (data.level <= LEVEL_WARN_LOW) {
-            Serial.println("[ALERT] 🟡 LOW WATER WARNING (" + String(data.level,1) + "%)");
+            Serial.println("[ALERT] WARNING — Water low ("
+                + String(data.level, 1) + "%)");
             anyAlert = true;
         }
     }
 
-    // pH alerts
     if (data.pH >= 0) {
         if (data.pH < PH_CRITICAL_LOW || data.pH > PH_CRITICAL_HIGH) {
-            Serial.println("[ALERT] 🔴 CRITICAL pH: " + String(data.pH,2)
-                + " (safe range: " + String(PH_CRITICAL_LOW) + "–" + String(PH_CRITICAL_HIGH) + ")");
+            Serial.println("[ALERT] CRITICAL — pH " + String(data.pH, 1)
+                + " outside BIS safe range (6.5–8.5)");
             anyAlert = true;
         } else if (data.pH < PH_WARN_LOW || data.pH > PH_WARN_HIGH) {
-            Serial.println("[ALERT] 🟡 pH WARNING: " + String(data.pH,2));
+            Serial.println("[ALERT] WARNING — pH " + String(data.pH, 1)
+                + " approaching unsafe range");
             anyAlert = true;
         }
     }
 
-    // Turbidity alerts
     if (data.turbidity >= 0) {
         if (data.turbidity > TURBIDITY_CRITICAL) {
-            Serial.println("[ALERT] 🔴 CRITICAL TURBIDITY: " + String(data.turbidity,1) + " NTU");
+            Serial.println("[ALERT] CRITICAL — Turbidity "
+                + String(data.turbidity, 1) + " NTU exceeds BIS limit");
             anyAlert = true;
         } else if (data.turbidity > TURBIDITY_WARN) {
-            Serial.println("[ALERT] 🟡 TURBIDITY WARNING: " + String(data.turbidity,1) + " NTU");
+            Serial.println("[ALERT] WARNING — Turbidity "
+                + String(data.turbidity, 1) + " NTU — water becoming cloudy");
             anyAlert = true;
         }
     }
 
-    // Leak alert
     if (data.leakDetected) {
-        Serial.println("[ALERT] 🔴 LEAK DETECTED at moisture sensor!");
+        Serial.println("[ALERT] CRITICAL — Leak detected at moisture sensor");
         anyAlert = true;
     }
 
     if (!anyAlert) {
-        Serial.println("[ALERT] ✅ All parameters within safe range");
+        Serial.println("[ALERT] All parameters within safe range");
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────
 // LED STATUS INDICATOR
-// Green = all OK and connected
-// Yellow = warning threshold crossed or WiFi connecting
-// Red = critical alert or offline
 // ─────────────────────────────────────────────────────────────────────
 void updateLEDs(const SensorData& data) {
     bool critical = (data.level >= LEVEL_CUTOFF_HIGH)
-                 || (data.level <= LEVEL_CRITICAL_LOW && data.level >= 0)
-                 || (data.pH < PH_CRITICAL_LOW || data.pH > PH_CRITICAL_HIGH)
+                 || (data.level <= LEVEL_CRITICAL_LOW  && data.level >= 0)
+                 || (data.pH    <  PH_CRITICAL_LOW      && data.pH    >= 0)
+                 || (data.pH    >  PH_CRITICAL_HIGH     && data.pH    >= 0)
                  || (data.turbidity > TURBIDITY_CRITICAL && data.turbidity >= 0)
                  || data.leakDetected;
 
-    bool warning  = (data.level <= LEVEL_WARN_LOW && data.level >= 0)
-                 || (data.pH < PH_WARN_LOW || data.pH > PH_WARN_HIGH)
-                 || (data.turbidity > TURBIDITY_WARN && data.turbidity >= 0)
+    bool warning  = (data.level <= LEVEL_WARN_LOW       && data.level >= 0)
+                 || (data.pH    <  PH_WARN_LOW           && data.pH    >= 0)
+                 || (data.pH    >  PH_WARN_HIGH          && data.pH    >= 0)
+                 || (data.turbidity > TURBIDITY_WARN     && data.turbidity >= 0)
                  || !wifiConnected;
 
     if (critical) {
@@ -547,18 +554,23 @@ void updateLEDs(const SensorData& data) {
 // PRINT READINGS TO SERIAL MONITOR
 // ─────────────────────────────────────────────────────────────────────
 void printReadings(const SensorData& data) {
-    Serial.println("┌─────────────────────────────────────────┐");
-    Serial.println("│         SENSOR READINGS                  │");
-    Serial.println("├─────────────────────────────────────────┤");
-    Serial.println("│ Water Level : " + String(data.level, 1)       + " %"     + (data.level < 0 ? " [ERROR]" : ""));
-    Serial.println("│ pH          : " + String(data.pH, 2)          +           (data.pH < 0 ? " [ERROR]" : ""));
-    Serial.println("│ Turbidity   : " + String(data.turbidity, 1)   + " NTU"   + " [MOCK]");
-    Serial.println("│ Flow Rate   : " + String(data.flowRate, 2)    + " L/min" + " [MOCK]");
-    Serial.println("│ Total Today : " + String(data.totalLitres, 1) + " L"     + " [MOCK]");
-    Serial.println("│ Leak        : " + String(data.leakDetected ? "⚠️ DETECTED" : "None") + " [MOCK]");
-    Serial.println("│ Battery     : " + String(data.batteryVoltage, 2) + " V"  + " [MOCK]");
-    Serial.println("│ WiFi        : " + String(wifiConnected ? "✅ Connected" : "❌ Offline"));
-    Serial.println("│ MQTT        : " + String(mqttConnected ? "✅ Connected" : "❌ Offline"));
-    Serial.println("│ Mock mode   : " + String(data.mockActive ? "YES (some sensors)" : "NO"));
-    Serial.println("└─────────────────────────────────────────┘");
+    Serial.println("┌────────────────────────────────────────────┐");
+    Serial.println("│            SENSOR READINGS                  │");
+    Serial.println("├────────────────────────────────────────────┤");
+    Serial.println("│ Mode        : "
+        + String(data.mockActive ? "MOCK (simulated)" : "REAL (hardware)"));
+    Serial.println("│ Water Level : "
+        + (data.level < 0 ? String("ERROR") : String(data.level, 1) + " %"));
+    Serial.println("│ pH          : "
+        + (data.pH < 0 ? String("ERROR") : String(data.pH, 1)));
+    Serial.println("│ Turbidity   : "
+        + (data.turbidity < 0 ? String("ERROR") : String(data.turbidity, 1) + " NTU"));
+    Serial.println("│ Flow Rate   : "
+        + (data.flowRate < 0 ? String("ERROR") : String(data.flowRate, 2) + " L/min"));
+    Serial.println("│ Total Today : " + String(data.totalLitres, 1) + " L");
+    Serial.println("│ Leak        : " + String(data.leakDetected ? "DETECTED" : "None"));
+    Serial.println("│ Battery     : " + String(data.batteryVoltage, 2) + " V");
+    Serial.println("│ WiFi        : " + String(wifiConnected ? "Connected" : "Offline"));
+    Serial.println("│ MQTT        : " + String(mqttConnected ? "Connected" : "Offline"));
+    Serial.println("└────────────────────────────────────────────┘");
 }

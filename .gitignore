@@ -2,11 +2,20 @@ backend/serviceAccountKey.json
 backend/node_modules/
 
 firmware/.pio/
+firmware/.vscode/
 
 app/build/
 app/.dart_tool/
 app/.flutter-plugins
 app/.flutter-plugins-dependencies
+app/android/app/google-services.json
+app/ios/Runner/GoogleService-Info.plist
+app/lib/firebase_options.dart
+app/.metadata
+app/.idea/
+app/*.iml
+app/android/.gradle/
+app/android/local.properties
 
 .vscode/
 *.code-workspace

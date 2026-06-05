@@ -7,8 +7,8 @@
 #define CONFIG_H
 
 // ── WiFi credentials ─────────────────────────────────────────
-#define WIFI_SSID        "Galaxy M33 5G 9DDE"
-#define WIFI_PASSWORD    "qeeq9644"
+#define WIFI_SSID        "YourWiFiName"
+#define WIFI_PASSWORD    "YourWiFiPassword"
 
 // ── MQTT broker ──────────────────────────────────────────────
 #define MQTT_BROKER      "broker.hivemq.com"   // free public broker for testing
