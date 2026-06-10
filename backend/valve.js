@@ -1,11 +1,10 @@
 // backend/valve.js
-// Simple Express REST API.
-// App calls POST /valve/command → this publishes to MQTT → ESP32 receives it.
+// REST API for valve control.
+// App calls POST /valve/command → publishes MQTT → ESP32 acts.
 
 const express = require('express');
 const router  = express.Router();
 
-// mqttClient passed in from server.js
 let mqttClient;
 
 function init(client) {
@@ -13,6 +12,13 @@ function init(client) {
 }
 
 router.post('/command', async (req, res) => {
+    // Guard: MQTT must be connected before sending commands
+    if (!mqttClient || !mqttClient.connected) {
+        return res.status(503).json({
+            error: 'MQTT not connected — cannot send valve command. Retry in a few seconds.'
+        });
+    }
+
     const { action, deviceId = 'node_01' } = req.body;
 
     if (!action || !['OPEN', 'CLOSE'].includes(action.toUpperCase())) {
@@ -26,9 +32,10 @@ router.post('/command', async (req, res) => {
 
     mqttClient.publish(topic, payload, { qos: 1 }, (err) => {
         if (err) {
+            console.error('[Valve] Publish error:', err.message);
             return res.status(500).json({ error: 'Failed to publish command' });
         }
-        console.log(`[Valve] Command sent: ${action} to ${deviceId}`);
+        console.log(`[Valve] ${action.toUpperCase()} sent to ${deviceId}`);
         res.json({ success: true, action: action.toUpperCase(), deviceId });
     });
 });

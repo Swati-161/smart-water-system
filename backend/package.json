@@ -1,10 +1,12 @@
 {
   "name": "smart-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Smart Water Management System — Node.js backend",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "simulate": "node simulate.js",
+    "test": "echo \"No tests yet\" && exit 0"
   },
   "keywords": [],
   "author": "",
