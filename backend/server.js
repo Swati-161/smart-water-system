@@ -3,6 +3,7 @@
 // SmAart Water Management System — Backend Entry Point
 // Runs: MQTT bridge + Firestore writer + alert engine +
 //       offline detection + daily consumption + REST API
+//       + Firestore valve command listener
 //
 // Start with: node server.js  (or npm start)
 // Simulator:  node simulate.js  (separate terminal, for testing)
@@ -72,6 +73,64 @@ mqttClient.on('connect', () => {
         if (err) console.error('[MQTT] Subscribe error (status):', err.message);
         else console.log('[MQTT] Subscribed to devices/node_01/status');
     });
+
+    // ── Firestore valve command listener ─────────────────────
+    // Started inside 'connect' so mqttClient is guaranteed ready
+    // Watches for command docs written by the Flutter app
+    // Forwards them to MQTT → ESP32 acts on them
+    // The 'executed: false' filter ensures each command fires once only
+    db.collection('devices').doc('node_01')
+        .collection('commands')
+        .where('executed', '==', false)
+        .onSnapshot(async (snap) => {
+            for (const change of snap.docChanges()) {
+                // Only process newly added documents
+                // 'modified' and 'removed' are ignored
+                if (change.type !== 'added') continue;
+
+                const cmd    = change.doc.data();
+                const action = cmd.action; // 'OPEN' or 'CLOSE'
+
+                if (!action || !['OPEN', 'CLOSE'].includes(action)) {
+                    console.warn('[Valve] Unknown action in command doc:', action);
+                    // Mark as executed anyway to prevent infinite retry
+                    await change.doc.ref.update({ executed: true }).catch(() => {});
+                    continue;
+                }
+
+                if (!mqttClient.connected) {
+                    console.warn('[Valve] MQTT not connected — command will retry on next snapshot');
+                    // Do NOT mark as executed — it will retry when next snapshot fires
+                    continue;
+                }
+
+                const topic   = 'devices/node_01/commands';
+                const payload = JSON.stringify({ command: action });
+
+                mqttClient.publish(topic, payload, { qos: 1 }, async (err) => {
+                    if (err) {
+                        console.error(`[Valve] Publish error for ${action}:`, err.message);
+                        // Do not mark executed — allow retry
+                        return;
+                    }
+
+                    // Mark as executed so the listener does not fire again for this doc
+                    await change.doc.ref.update({
+                        executed:   true,
+                        executedAt: admin.firestore.FieldValue.serverTimestamp()
+                    }).catch((e) => {
+                        console.error('[Valve] Could not mark command executed:', e.message);
+                    });
+
+                    console.log(`[Valve] ${action} forwarded to MQTT — command doc marked executed`);
+                });
+            }
+        }, (err) => {
+            // onSnapshot error handler — fires if Firestore connection drops
+            console.error('[Valve] Command listener error:', err.message);
+        });
+
+    console.log('[Valve] Firestore command listener active');
 });
 
 mqttClient.on('message', async (topic, message) => {
@@ -79,8 +138,7 @@ mqttClient.on('message', async (topic, message) => {
         const payload = JSON.parse(message.toString());
 
         if (topic.includes('readings')) {
-            // Skip invalid readings — -1 means sensor error in firmware
-            // Still write to Firestore but flag them
+            // -1 means sensor error in firmware — still write but flag it
             const hasErrors = payload.level_pct === -1
                            || payload.ph === -1
                            || payload.turbidity_ntu === -1;
@@ -133,8 +191,7 @@ mqttClient.on('offline', () => {
 
 // ── Offline detection ─────────────────────────────────────────
 // Checks every 2 minutes if device has been silent for 10+ minutes
-// If so, marks it offline in Firestore and saves an alert
-const OFFLINE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+const OFFLINE_THRESHOLD_MS = 10 * 60 * 1000;
 
 setInterval(async () => {
     try {
@@ -164,7 +221,7 @@ setInterval(async () => {
 }, 2 * 60 * 1000);
 
 // ── Daily consumption record ──────────────────────────────────
-// At midnight: saves the day's total water usage, resets counter
+// At midnight: saves the day's total water usage
 function scheduleMidnightReset() {
     const now      = new Date();
     const midnight = new Date();
@@ -192,7 +249,7 @@ function scheduleMidnightReset() {
         } catch (err) {
             console.error('[Daily] Error:', err.message);
         }
-        scheduleMidnightReset(); // schedule next midnight
+        scheduleMidnightReset();
     }, msUntilMidnight);
 }
 
