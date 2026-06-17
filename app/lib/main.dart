@@ -1,6 +1,7 @@
 // lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'services/firestore_service.dart';
@@ -26,7 +27,7 @@ class SmAartApp extends StatelessWidget {
         Provider<FirestoreService>(create: (_) => FirestoreService()),
       ],
       child: MaterialApp(
-        title: 'SmAart Water System',
+        title: AppStrings.appName,
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
@@ -41,7 +42,22 @@ class SmAartApp extends StatelessWidget {
             ),
           ),
         ),
-        home: const LoginScreen(),
+        // Check auth state on startup — skip login if already signed in
+        home: StreamBuilder<User?>(
+          stream: FirebaseAuth.instance.authStateChanges(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (snapshot.hasData) {
+              // User is already signed in — go straight to dashboard
+              return const DashboardScreen();
+            }
+            return const LoginScreen();
+          },
+        ),
       ),
     );
   }

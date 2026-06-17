@@ -1,3 +1,4 @@
+// lib/services/firestore_service.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/sensor_data.dart';
 import '../models/alert_item.dart';
@@ -6,8 +7,7 @@ class FirestoreService {
   final _db       = FirebaseFirestore.instance;
   final _deviceId = 'node_01';
 
-  // ── Live dashboard stream ──────────────────────────────────
-  // Updates within 200ms of new data arriving
+  // ── Live dashboard stream ─────────────────────────────────
   Stream<SensorData> latestReadingStream() {
     return _db.collection('devices').doc(_deviceId)
         .snapshots()
@@ -17,14 +17,14 @@ class FirestoreService {
         });
   }
 
-  // ── Device online/offline status ──────────────────────────
+  // ── Device online/offline ─────────────────────────────────
   Stream<String> deviceStatusStream() {
     return _db.collection('devices').doc(_deviceId)
         .snapshots()
         .map((doc) => doc.data()?['status'] as String? ?? 'unknown');
   }
 
-  // ── History for graphs ─────────────────────────────────────
+  // ── History for graphs ────────────────────────────────────
   Future<List<SensorData>> getHistory(int days) async {
     final since = DateTime.now().subtract(Duration(days: days));
     final snap  = await _db
@@ -32,7 +32,7 @@ class FirestoreService {
         .collection('readings')
         .where('timestamp', isGreaterThan: Timestamp.fromDate(since))
         .orderBy('timestamp', descending: false)
-        .limit(500) // cap to prevent huge reads
+        .limit(500)
         .get();
 
     return snap.docs
@@ -40,23 +40,20 @@ class FirestoreService {
         .toList();
   }
 
-  // ── Daily consumption ─────────────────────────────────────
-  Future<List<Map<String, dynamic>>> getDailyConsumption(int days) async {
-    final history = await getHistory(days);
-    final Map<String, double> dailyMap = {};
+  // ── Daily consumption from backend-computed collection ────
+  // Reads from daily_consumption subcollection written by server.js
+  Future<List<Map<String, dynamic>>> getDailyConsumption() async {
+    final snap = await _db
+        .collection('devices').doc(_deviceId)
+        .collection('daily_consumption')
+        .orderBy('date', descending: true)
+        .limit(7)
+        .get();
 
-    for (final reading in history) {
-      final dateKey = '${reading.timestamp.day}/${reading.timestamp.month}';
-      dailyMap[dateKey] = (dailyMap[dateKey] ?? 0) + 
-          (reading.totalLitres / 48); // approximate per reading
-    }
-
-    return dailyMap.entries
-        .map((e) => {'date': e.key, 'litres': e.value})
-        .toList();
+    return snap.docs.map((d) => d.data()).toList();
   }
 
-  // ── Alerts ────────────────────────────────────────────────
+  // ── Alerts stream ─────────────────────────────────────────
   Stream<List<AlertItem>> alertsStream() {
     return _db
         .collection('devices').doc(_deviceId)
@@ -69,7 +66,7 @@ class FirestoreService {
             .toList());
   }
 
-  // ── Mark alert as resolved ────────────────────────────────
+  // ── Resolve alert ─────────────────────────────────────────
   Future<void> resolveAlert(String alertId) async {
     await _db
         .collection('devices').doc(_deviceId)
@@ -77,13 +74,25 @@ class FirestoreService {
         .update({'resolved': true});
   }
 
-  // ── Save threshold config ─────────────────────────────────
+  // ── Valve command via Firestore ───────────────────────────
+  // Writes a command doc that server.js picks up and forwards to MQTT
+  Future<void> sendValveCommand(String action) async {
+    await _db.collection('devices').doc(_deviceId)
+        .collection('commands').add({
+          'action':    action,   // 'OPEN' or 'CLOSE'
+          'timestamp': FieldValue.serverTimestamp(),
+          'source':    'app',
+          'executed':  false,
+        });
+  }
+
+  // ── Save thresholds ───────────────────────────────────────
   Future<void> saveThresholds(Map<String, double> thresholds) async {
     await _db.collection('devices').doc(_deviceId)
         .set({'thresholds': thresholds}, SetOptions(merge: true));
   }
 
-  // ── Get threshold config ──────────────────────────────────
+  // ── Get thresholds ────────────────────────────────────────
   Future<Map<String, dynamic>> getThresholds() async {
     final doc = await _db.collection('devices').doc(_deviceId).get();
     return doc.data()?['thresholds'] as Map<String, dynamic>? ?? {};

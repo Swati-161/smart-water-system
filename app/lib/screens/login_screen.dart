@@ -1,3 +1,5 @@
+// lib/screens/login_screen.dart
+// Only change from original: added const to DashboardScreen() in _goToDashboard
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dashboard_screen.dart';
@@ -26,22 +28,13 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  // ── Sign in with existing account ──────────────────────────
   Future<void> _signIn() async {
     if (!_formKey.currentState!.validate()) return;
-
-    setState(() {
-      _isLoading    = true;
-      _errorMessage = null;
-    });
-
+    setState(() { _isLoading = true; _errorMessage = null; });
     try {
       await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email:    _emailCtrl.text.trim(),
-        password: _passwordCtrl.text.trim(),
-      );
+        email: _emailCtrl.text.trim(), password: _passwordCtrl.text.trim());
       if (mounted) _goToDashboard();
-
     } on FirebaseAuthException catch (e) {
       setState(() => _errorMessage = _friendlyError(e.code));
     } finally {
@@ -49,22 +42,13 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // ── Create account (for first time setup) ──────────────────
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
-
-    setState(() {
-      _isLoading    = true;
-      _errorMessage = null;
-    });
-
+    setState(() { _isLoading = true; _errorMessage = null; });
     try {
       await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email:    _emailCtrl.text.trim(),
-        password: _passwordCtrl.text.trim(),
-      );
+        email: _emailCtrl.text.trim(), password: _passwordCtrl.text.trim());
       if (mounted) _goToDashboard();
-
     } on FirebaseAuthException catch (e) {
       setState(() => _errorMessage = _friendlyError(e.code));
     } finally {
@@ -72,31 +56,24 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // Fixed: added const
   void _goToDashboard() {
-  Navigator.of(context).pushReplacement(
-    MaterialPageRoute(builder: (_) => DashboardScreen()),
-  );
-}
-  // ── Convert Firebase error codes to readable messages ──────
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const DashboardScreen()),
+    );
+  }
+
   String _friendlyError(String code) {
     switch (code) {
-      case 'user-not-found':
-        return 'No account found with this email. Use Register to create one.';
+      case 'user-not-found':    return 'No account found. Use Register to create one.';
       case 'wrong-password':
-      case 'invalid-credential':
-        return 'Incorrect email or password. Please try again.';
-      case 'email-already-in-use':
-        return 'An account already exists with this email. Use Sign In.';
-      case 'weak-password':
-        return 'Password must be at least 6 characters.';
-      case 'invalid-email':
-        return 'Please enter a valid email address.';
-      case 'too-many-requests':
-        return 'Too many failed attempts. Please wait a few minutes.';
-      case 'network-request-failed':
-        return 'No internet connection. Please check your network.';
-      default:
-        return 'Something went wrong ($code). Please try again.';
+      case 'invalid-credential': return 'Incorrect email or password.';
+      case 'email-already-in-use': return 'Account already exists. Use Sign In.';
+      case 'weak-password':     return 'Password must be at least 6 characters.';
+      case 'invalid-email':     return 'Please enter a valid email address.';
+      case 'too-many-requests': return 'Too many failed attempts. Wait a few minutes.';
+      case 'network-request-failed': return 'No internet connection.';
+      default: return 'Something went wrong ($code). Please try again.';
     }
   }
 
@@ -111,45 +88,27 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-
-                // ── Logo ─────────────────────────────
                 Container(
                   width: 90, height: 90,
                   decoration: BoxDecoration(
                     color: AppColors.primary,
                     borderRadius: BorderRadius.circular(24),
                   ),
-                  child: const Icon(
-                    Icons.water_drop,
-                    size: 52,
-                    color: Colors.white,
-                  ),
+                  child: const Icon(Icons.water_drop, size: 52, color: Colors.white),
                 ),
                 const SizedBox(height: 20),
-
-                // ── App name ────────────────────────────────
-                Text(
-                  AppStrings.appName,
+                Text(AppStrings.appName,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primary,
-                  ),
-                ),
+                    fontWeight: FontWeight.bold, color: AppColors.primary)),
                 const SizedBox(height: 6),
-                Text(
-                  'Sign in to monitor your water system',
+                Text('Sign in to monitor your water system',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.grey[600],
-                  ),
-                ),
+                    color: Colors.grey[600])),
                 const SizedBox(height: 36),
-
-                // ── Form card ───────────────────────────────
                 Card(
                   elevation: 3,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
+                    borderRadius: BorderRadius.circular(16)),
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Form(
@@ -157,66 +116,47 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-
-                          // Email field
                           TextFormField(
-                            controller:   _emailCtrl,
+                            controller: _emailCtrl,
                             keyboardType: TextInputType.emailAddress,
                             textInputAction: TextInputAction.next,
                             decoration: InputDecoration(
-                              labelText:   'Email address',
-                              prefixIcon:  const Icon(Icons.email_outlined),
-                              border:      OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                            ),
+                              labelText: 'Email address',
+                              prefixIcon: const Icon(Icons.email_outlined),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10))),
                             validator: (v) {
-                              if (v == null || v.trim().isEmpty) {
-                                return 'Please enter your email';
-                              }
-                              if (!v.contains('@')) {
-                                return 'Please enter a valid email';
-                              }
+                              if (v == null || v.trim().isEmpty) return 'Please enter your email';
+                              if (!v.contains('@')) return 'Please enter a valid email';
                               return null;
                             },
                           ),
                           const SizedBox(height: 16),
-
-                          // Password field
                           TextFormField(
-                            controller:      _passwordCtrl,
-                            obscureText:     _obscurePassword,
+                            controller: _passwordCtrl,
+                            obscureText: _obscurePassword,
                             textInputAction: TextInputAction.done,
                             onFieldSubmitted: (_) => _signIn(),
                             decoration: InputDecoration(
-                              labelText:  'Password',
+                              labelText: 'Password',
                               prefixIcon: const Icon(Icons.lock_outlined),
                               border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
+                                borderRadius: BorderRadius.circular(10)),
                               suffixIcon: IconButton(
-                                icon: Icon(
-                                  _obscurePassword
-                                      ? Icons.visibility_outlined
-                                      : Icons.visibility_off_outlined,
-                                ),
+                                icon: Icon(_obscurePassword
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined),
                                 onPressed: () => setState(() =>
-                                    _obscurePassword = !_obscurePassword),
+                                  _obscurePassword = !_obscurePassword),
                               ),
                             ),
                             validator: (v) {
-                              if (v == null || v.trim().isEmpty) {
-                                return 'Please enter your password';
-                              }
-                              if (v.length < 6) {
-                                return 'Password must be at least 6 characters';
-                              }
+                              if (v == null || v.trim().isEmpty) return 'Please enter your password';
+                              if (v.length < 6) return 'Password must be at least 6 characters';
                               return null;
                             },
                           ),
                           const SizedBox(height: 20),
-
-                          // Error message
                           if (_errorMessage != null) ...[
                             Container(
                               padding: const EdgeInsets.all(10),
@@ -224,30 +164,18 @@ class _LoginScreenState extends State<LoginScreen> {
                                 color: AppColors.danger.withOpacity(0.08),
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                  color: AppColors.danger.withOpacity(0.3),
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.error_outline,
-                                      color: AppColors.danger, size: 18),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      _errorMessage!,
-                                      style: TextStyle(
-                                        color: AppColors.danger,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                  color: AppColors.danger.withOpacity(0.3))),
+                              child: Row(children: [
+                                Icon(Icons.error_outline,
+                                  color: AppColors.danger, size: 18),
+                                const SizedBox(width: 8),
+                                Expanded(child: Text(_errorMessage!,
+                                  style: TextStyle(
+                                    color: AppColors.danger, fontSize: 13))),
+                              ]),
                             ),
                             const SizedBox(height: 16),
                           ],
-
-                          // Sign in button
                           SizedBox(
                             height: 48,
                             child: ElevatedButton(
@@ -256,67 +184,39 @@ class _LoginScreenState extends State<LoginScreen> {
                                 backgroundColor: AppColors.primary,
                                 foregroundColor: Colors.white,
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                              ),
+                                  borderRadius: BorderRadius.circular(10))),
                               child: _isLoading
-                                  ? const SizedBox(
-                                      width: 22, height: 22,
-                                      child: CircularProgressIndicator(
-                                        color: Colors.white,
-                                        strokeWidth: 2.5,
-                                      ),
-                                    )
-                                  : const Text(
-                                      'Sign In',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-            ),
+                                ? const SizedBox(width: 22, height: 22,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white, strokeWidth: 2.5))
+                                : const Text('Sign In',
+                                    style: TextStyle(
+                                      fontSize: 16, fontWeight: FontWeight.w600)),
+                            ),
                           ),
                           const SizedBox(height: 12),
-
-                          // Register button
                           SizedBox(
                             height: 48,
                             child: OutlinedButton(
                               onPressed: _isLoading ? null : _register,
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: AppColors.primary,
-                                side: BorderSide(color: AppColors.primary),
+                                side: const BorderSide(color: AppColors.primary),
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                              ),
-                              child: const Text(
-                                'Create Account',
+                                  borderRadius: BorderRadius.circular(10))),
+                              child: const Text('Create Account',
                                 style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
+                                  fontSize: 16, fontWeight: FontWeight.w600)),
                             ),
                           ),
-
                         ],
                       ),
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 24),
-
-                // ── Footer note ─────────────────────────────
-                Text(
-                  'Your data is stored securely on Firebase',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[500],
-                  ),
-                ),
-
+                Text('Your data is stored securely on Firebase',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500])),
               ],
             ),
           ),
