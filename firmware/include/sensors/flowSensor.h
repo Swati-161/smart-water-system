@@ -2,6 +2,8 @@
 #ifndef FLOW_SENSOR_H
 #define FLOW_SENSOR_H
 
+#include <Arduino.h>  
+
 void flowSensor_init();
 
 // Returns current flow rate in litres per minute

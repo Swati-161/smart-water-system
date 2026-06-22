@@ -4,6 +4,8 @@
 #ifndef PH_SENSOR_H
 #define PH_SENSOR_H
 
+#include <stdint.h> 
+
 // Call once in setup()
 // Returns false if TCS34725 not detected on I2C
 bool phSensor_init();

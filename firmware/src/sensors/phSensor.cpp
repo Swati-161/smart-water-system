@@ -33,7 +33,7 @@
 // TCS34725 with 700ms integration time for better colour accuracy
 // Longer integration = more light gathered = more stable readings
 static Adafruit_TCS34725 tcs = Adafruit_TCS34725(
-    TCS34725_INTEGRATIONTIME_700MS,
+    TCS34725_INTEGRATIONTIME_614MS,   // closest available to 700ms — longest integration time for best accuracy
     TCS34725_GAIN_1X
 );
 
